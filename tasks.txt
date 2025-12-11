@@ -1,0 +1,14 @@
+From VRN file compare vehicle number to Database "checkpostmaster".
+
+if a vehicle number is not found in checkpostmaster then fetch it's data (Gross weight) from website and update it's data in vrn file. Means add a gross_weight column in vrn file.
+
+In form only yesterday and today's date should be selected.
+
+
+In automation apply a backup for uploading to S3. It is stopping the program.
+
+Some excel files have merged cell, which is cauing error.
+
+Amazon cloud platform gave an error : Connection timeout
+
+For some vrn files output is blank, because all vehicle numbers are invalid. What to do?
