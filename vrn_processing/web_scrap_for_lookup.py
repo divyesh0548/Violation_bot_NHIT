@@ -1,6 +1,7 @@
 import time
 import pandas as pd
 from selenium import webdriver
+from selenium.webdriver.chrome.service import Service
 from selenium.webdriver.common.by import By
 from selenium.webdriver.common.action_chains import ActionChains
 from selenium.webdriver.support.ui import WebDriverWait
@@ -9,15 +10,21 @@ from selenium.common.exceptions import TimeoutException, WebDriverException
 import psycopg2
 from psycopg2 import extras
 from typing import Tuple
+try:
+    from .env_loader import load_env_file, get_env, get_env_int
+except ImportError:
+    from env_loader import load_env_file, get_env, get_env_int
+
+load_env_file()
 
 URL = "https://parivahan.gov.in/"
 WAIT_TIME = 30
 ELEMENT_WAIT = 15
-DB_HOST = "db-1.c2n44a20y9k5.us-east-1.rds.amazonaws.com"
-DB_PORT = 5432
-DB_NAME = "nhit"
-DB_USER = "postgres"
-DB_PASSWORD = "postgres1234"
+DB_HOST = get_env("LOOKUP_DB_HOST")
+DB_PORT = get_env_int("LOOKUP_DB_PORT", 5432)
+DB_NAME = get_env("LOOKUP_DB_NAME")
+DB_USER = get_env("LOOKUP_DB_USER")
+DB_PASSWORD = get_env("LOOKUP_DB_PASSWORD")
 
 def get_db_connection():
     """Create and return a PostgreSQL database connection"""
@@ -81,18 +88,87 @@ def check_and_restore_db_connection(conn):
 def setup_driver():
     try:
         options = webdriver.ChromeOptions()
+        
+        # Basic options
         options.add_argument('--disable-images')
         options.add_argument('--blink-settings=imagesEnabled=false')
         options.add_argument('--disable-gpu')
         options.page_load_strategy = 'normal'
-        prefs = {"profile.managed_default_content_settings.images": 2}
+        
+        # Stability and compatibility options
+        options.add_argument('--no-sandbox')
+        options.add_argument('--disable-dev-shm-usage')
+        options.add_argument('--disable-extensions')
+        options.add_argument('--disable-software-rasterizer')
+        options.add_argument('--disable-background-timer-throttling')
+        options.add_argument('--disable-backgrounding-occluded-windows')
+        options.add_argument('--disable-renderer-backgrounding')
+        options.add_argument('--disable-features=TranslateUI')
+        options.add_argument('--remote-allow-origins=*')
+        options.add_argument('--disable-web-security')
+        options.add_argument('--allow-running-insecure-content')
+        
+        # User agent to avoid detection
+        options.add_argument('--user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36')
+        
+        # Preferences
+        prefs = {
+            "profile.managed_default_content_settings.images": 2,
+            "profile.default_content_setting_values.notifications": 2,
+            "profile.default_content_settings.popups": 0
+        }
         options.add_experimental_option("prefs", prefs)
-        driver = webdriver.Chrome(options=options)
-        driver.maximize_window()
-        print("Browser launched")
+        # Removed excludeSwitches and useAutomationExtension as they might interfere with ChromeDriver
+        
+        # Try to create driver with service
+        try:
+            # First try with default service
+            driver = webdriver.Chrome(options=options)
+        except Exception as e1:
+            print(f"  [WARN] First attempt failed: {e1}")
+            print("  [INFO] Retrying with explicit service configuration...")
+            try:
+                # Try with explicit service (handles ChromeDriver path issues)
+                service = Service()
+                driver = webdriver.Chrome(service=service, options=options)
+            except Exception as e2:
+                print(f"  [WARN] Second attempt failed: {e2}")
+                print("  [INFO] Retrying with minimal options...")
+                # Last resort: minimal options
+                minimal_options = webdriver.ChromeOptions()
+                minimal_options.add_argument('--no-sandbox')
+                minimal_options.add_argument('--disable-dev-shm-usage')
+                driver = webdriver.Chrome(options=minimal_options)
+        
+        try:
+            driver.maximize_window()
+        except Exception as e:
+            print(f"  [WARNING] Could not maximize window: {e}")
+            # Continue anyway - window might already be maximized
+        
+        # Verify driver is responsive (without JavaScript test to avoid Runtime.evaluate issues)
+        try:
+            _ = driver.current_url
+            print("Browser launched successfully - Driver is responsive")
+        except Exception as url_error:
+            print(f"  [ERROR] Driver is not responsive: {url_error}")
+            try:
+                driver.quit()
+            except:
+                pass
+            return None
+        
         return driver
+        
     except WebDriverException as e:
         print(f"Browser setup failed: {e}")
+        import traceback
+        print(f"Full error traceback:\n{traceback.format_exc()}")
+        return None
+    except Exception as e:
+        print(f"Unexpected error during browser setup: {e}")
+        import traceback
+        print(f"Full error traceback:\n{traceback.format_exc()}")
         return None
 
 def wait_for_page_load(driver, wait, timeout=30):
@@ -450,46 +526,51 @@ def restart_browser_and_continue(driver):
     return new_driver, new_wait
 
 def insert_vehicle_to_checkpost(cursor, veh_reg_no, weight):
-    """Insert a single vehicle record into checkpostmaster table.
+    """Insert a single vehicle record into appropriate table based on weight.
     
-    Returns: (success: bool, message: str)
+    - If weight < 100: Insert into capacity_vehicle_numbers table
+    - If weight >= 100: Insert into checkpostmaster table
+    
+    Returns: (success: bool, message: str, table_name: str)
     """
     try:
         # Convert weight to float and validate
         try:
             weight_value = float(weight)
         except (TypeError, ValueError):
-            return False, f"Invalid weight: {weight}"
+            return False, f"Invalid weight: {weight}", None
 
-        # Skip records with weight <= 100
-        if weight_value <= 100:
-            return False, f"Weight <= 100: {weight_value}"
+        # Determine which table to use based on weight
+        if weight_value < 100:
+            table_name = "capacity_vehicle_numbers"
+        else:
+            table_name = "checkpostmaster"
 
-        # Check if vehicle already exists
-        check_query = """
+        # Check if vehicle already exists in the appropriate table
+        check_query = f"""
         SELECT COUNT(*) as count
-        FROM checkpostmaster
+        FROM {table_name}
         WHERE "Unique Vehicle Number" = %s
         """
         cursor.execute(check_query, (veh_reg_no,))
         result = cursor.fetchone()
 
         if result[0] > 0:
-            return False, "Already exists in database"
+            return False, f"Already exists in {table_name}", table_name
 
-        # Insert new vehicle
-        insert_query = """
-        INSERT INTO checkpostmaster
+        # Insert new vehicle into the appropriate table
+        insert_query = f"""
+        INSERT INTO {table_name}
         ("Unique Vehicle Number", "weight")
         VALUES (%s, %s)
         """
         cursor.execute(insert_query, (veh_reg_no, weight_value))
-        return True, f"Added successfully"
+        return True, f"Added successfully to {table_name}", table_name
 
     except psycopg2.Error as e:
-        return False, f"Database error: {e}"
+        return False, f"Database error: {e}", None
     except Exception as e:
-        return False, f"Error: {e}"
+        return False, f"Error: {e}", None
 
 def process_single_vehicle(driver, wait, vehicle_no, idx, df):
     """Process a single vehicle - extract weight only."""
@@ -638,7 +719,10 @@ def process_single_vehicle(driver, wait, vehicle_no, idx, df):
 
 def scrape_vehicle_weights(df_not_found):
     """
-    Scrape vehicle weights and update checkpostmaster table AFTER EACH VEHICLE is processed.
+    Scrape vehicle weights and update database tables AFTER EACH VEHICLE is processed.
+    
+    - Vehicles with weight < 100 are inserted into capacity_vehicle_numbers table
+    - Vehicles with weight >= 100 are inserted into checkpostmaster table
     
     Returns the dataframe with Weight column populated (same as before - no breaking changes).
     
@@ -721,6 +805,8 @@ def scrape_vehicle_weights(df_not_found):
     processed_count = 0
     db_added_count = 0
     db_skipped_count = 0
+    checkpostmaster_count = 0
+    capacity_vehicle_count = 0
 
     # ============================================================================
     # MODIFIED: Process each vehicle and INSERT INTO DATABASE IMMEDIATELY
@@ -753,11 +839,15 @@ def scrape_vehicle_weights(df_not_found):
                 
                 try:
                     with conn.cursor() as cursor:
-                        success_insert, message = insert_vehicle_to_checkpost(cursor, vehicle_no, weight)
+                        success_insert, message, table_name = insert_vehicle_to_checkpost(cursor, vehicle_no, weight)
                         conn.commit()
                         
                         if success_insert:
                             db_added_count += 1
+                            if table_name == "checkpostmaster":
+                                checkpostmaster_count += 1
+                            elif table_name == "capacity_vehicle_numbers":
+                                capacity_vehicle_count += 1
                             print(f"[DB-OK] {vehicle_no}: {message}")
                         else:
                             db_skipped_count += 1
@@ -806,7 +896,9 @@ def scrape_vehicle_weights(df_not_found):
     print(f"{'='*50}")
     print(f"Total vehicles to process: {len(df)}")
     print(f"Vehicles scraped: {processed_count}")
-    print(f"Records added to checkpostmaster: {db_added_count}")
+    print(f"Records added to checkpostmaster (weight >= 100): {checkpostmaster_count}")
+    print(f"Records added to capacity_vehicle_numbers (weight < 100): {capacity_vehicle_count}")
+    print(f"Total records added to database: {db_added_count}")
     print(f"Records skipped: {db_skipped_count}")
     print(f"{'='*50}")
 

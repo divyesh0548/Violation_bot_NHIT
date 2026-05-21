@@ -12,6 +12,12 @@ import requests
 import openpyxl
 from io import BytesIO
 import logging
+try:
+    from .env_loader import load_env_file, get_env
+except ImportError:
+    from env_loader import load_env_file, get_env
+
+load_env_file()
 
 # Configure logging
 logging.basicConfig(
@@ -22,14 +28,14 @@ logger = logging.getLogger(__name__)
 
 AWS_S3_BUCKET_NAME = "snt-nhit-data"
 AWS_REGION = "us-east-1"
-AWS_ACCESS_KEY_ID="AKIA4MBPFHU6H4CPD7VV"
-AWS_SECRET_ACCESS_KEY="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"
+AWS_ACCESS_KEY_ID = get_env("AWS_ACCESS_KEY_ID")
+AWS_SECRET_ACCESS_KEY = get_env("AWS_SECRET_ACCESS_KEY")
 
 # Email configuration (update with your SMTP settings)
 SMTP_SERVER = "smtp.gmail.com"  # Change as needed
 SMTP_PORT = 587
-SENDER_EMAIL = "bots.admin@sharpandtannan.com"  # Your email
-SENDER_PASSWORD = "uyun sooi jvic qjyb"  # Your email app password
+SENDER_EMAIL = get_env("SENDER_EMAIL")  # Your email
+SENDER_PASSWORD = get_env("SENDER_PASSWORD")  # Your email app password
 
 s3_client = boto3.client(
                 's3',
@@ -185,13 +191,27 @@ def send_email_to_plaza(email_data):
         if not recipient_emails:
             print(f" No recipient emails found for Record ID {record_id}")
             return False
+        
+        # Special case: If entity name is "khemana", add khemanatoll@nhit.co.in to recipients
+        if plaza_name_raw.lower() == "khemana":
+            khemana_email = "khemanatoll@nhit.co.in"
+            if khemana_email not in recipient_emails:
+                recipient_emails.append(khemana_email)
+                print(f"  Added Khemana toll email to recipients: {khemana_email}")
+
+        if plaza_name_raw.lower() == "bahadrabad":
+            bahadrabad_email = "bhadarabadtoll@nhit.co.in"
+            if bahadrabad_email not in recipient_emails:
+                recipient_emails.append(bahadrabad_email)
+                print(f"  Added Bahadrabad toll email to recipients: {bahadrabad_email}")
+            
+        
         print(f"  Original Recipients: {', '.join(recipient_emails)}")
     
         cc_emails = [
             "jyotibaghel@nhit.co.in",
             "vijaykumar@nhit.co.in",
             "rahulagrawal@nhit.co.in",
-            "dhanshree.mahajan@sharpandtannan.com"
         ]
         
         # Check if file has violations using check_excel_rows

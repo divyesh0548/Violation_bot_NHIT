@@ -36,6 +36,24 @@ MANIFEST
 pip-log.txt
 pip-delete-this-directory.txt
 
+# Data files
+*.csv
+*.xlsx
+*.xls
+
+# Archives and compressed files
+*.zip
+*.rar
+*.tar
+*.gz
+*.tgz
+*.bz2
+*.7z
+*.xz
+*.tar.gz
+*.tar.bz2
+*.tar.xz
+
 # Unit test / coverage reports
 htmlcov/
 .tox/

@@ -436,7 +436,7 @@ class VRNProcessingAutomation:
                     AND file_status = 1
                     AND timestamp IS NOT NULL
                     AND timestamp::text != ''
-                    AND (timestamp AT TIME ZONE 'Asia/Kolkata') > NOW() - INTERVAL '108 hours'
+                    AND (timestamp AT TIME ZONE 'Asia/Kolkata') > NOW() - INTERVAL '22 hours'
                     ORDER BY id ASC
                 """
                 cursor.execute(query)
@@ -578,8 +578,8 @@ class VRNProcessingAutomation:
                 conn.close()
     
     def check_and_process_pending_emails(self, date=None, shift=None):
-        # pending_email_ids = self.check_pending_emails(date=date, shift=shift)
-        pending_email_ids =self.check_pending_emails_old()
+        pending_email_ids = self.check_pending_emails(date=date, shift=shift)
+        # pending_email_ids =self.check_pending_emails_old()
         
         if not pending_email_ids:
             print("No pending emails to process")
@@ -658,7 +658,7 @@ class VRNProcessingAutomation:
                         AND entity_name IN ({placeholders})
                         AND timestamp IS NOT NULL
                         AND timestamp::text != ''
-                        AND (timestamp AT TIME ZONE 'Asia/Kolkata') > NOW() - INTERVAL '90 hours'
+                        AND (timestamp AT TIME ZONE 'Asia/Kolkata') > NOW() - INTERVAL '40 hours'
                         ORDER BY id ASC
                     """
                     # AND timestamp < NOW() - INTERVAL '10 hours'
@@ -784,119 +784,63 @@ class VRNProcessingAutomation:
                     
                     try:
                         # Step 1: Download file
-                        # print("\n  STEP 1: Downloading file...")
-                        # url_path = urlparse(vrn_url).path 
-                        # _, ext = os.path.splitext(url_path)
-                        # temp_filename = os.path.join(
-                        #     self.working_dir, 
-                        #     f"vrn_temp_{record_id}{ext}"
-                        # )
+                        print("\n  STEP 1: Downloading file...")
+                        url_path = urlparse(vrn_url).path 
+                        _, ext = os.path.splitext(url_path)
+                        temp_filename = os.path.join(
+                            self.working_dir, 
+                            f"vrn_temp_{record_id}{ext}"
+                        )
                         
-                        # if not self.download_file_from_s3(vrn_url, temp_filename):
-                        #     self.update_database(record_id, file_status=0)
-                        #     continue
+                        if not self.download_file_from_s3(vrn_url, temp_filename):
+                            print("  [WARNING] Download failed, skipping this file")
+                            continue
                         
-                        # # 2. Rename to vrn_file.xlsx
-                        # print("\n  STEP 2: Renaming file...")
-                        # if not self.rename_to_vrn_file(temp_filename):
-                        #     self.update_database(record_id, file_status=0)
-                        #     continue
+                        # 2. Rename to vrn_file.xlsx
+                        print("\n  STEP 2: Renaming file...")
+                        if not self.rename_to_vrn_file(temp_filename):
+                            print("  [WARNING] Rename failed, skipping this file")
+                            continue
                         
-                        # # Step 3: Run VRN processing script
-                        # print("\n  STEP 3: Running VRN processing script...")
-                        # script_result = self.run_vrn_main_script()
+                        # Step 3: Run VRN processing script
+                        print("\n  STEP 3: Running VRN processing script...")
+                        script_result = self.run_vrn_main_script()
                         
-                        # if script_result == "timeout":
-                        #     # Timeout occurred - web-scraping incomplete
-                        #     # Don't mark as failed, leave as pending for retry
-                        #     print("\n  [WARNING] Processing incomplete due to timeout")
-                        #     print("  [INFO] Record will remain pending and be retried in next iteration")
-                        #     print("  [INFO] Skipping remaining steps (Steps 4-7) as workflow depends on web-scraping data")
-                        #     self.cleanup_working_files()
-                        #     continue  # Skip to next record, this one will be retried
-                        # elif not script_result:
-                        #     # Script failed (not timeout)
-                        #     self.update_database(record_id, file_status=0)
-                        #     self.cleanup_working_files()
-                        #     continue
+                        if script_result == "timeout":
+                            # Timeout occurred - web-scraping incomplete
+                            print("\n  [WARNING] Processing incomplete due to timeout")
+                            print("  [INFO] Record will remain pending and be retried in next iteration")
+                            print("  [INFO] Skipping remaining steps as workflow depends on web-scraping data")
+                            self.cleanup_working_files()
+                            continue  # Skip to next record, this one will be retried
+                        elif not script_result:
+                            # Script failed (not timeout)
+                            print("  [WARNING] Script processing failed, skipping remaining steps")
+                            self.cleanup_working_files()
+                            continue
                         
-                        # # Step 4: Rename output file
-                        # print("\n  STEP 4: Renaming output file...")
-                        # new_filename, final_filename = self.rename_output_file(str(date), shift)
-                        # if not new_filename:
-                        #     self.update_database(record_id, file_status=0)
-                        #     self.cleanup_working_files()
-                        #     continue
+                        # Step 4: Rename output file
+                        print("\n  STEP 4: Renaming output file...")
+                        new_filename, final_filename = self.rename_output_file(str(date), shift)
+                        if not new_filename:
+                            print("  [WARNING] Output file rename failed")
+                            self.cleanup_working_files()
+                            continue
                         
-                        # # Step 5: Upload to S3
-                        # print("\n  STEP 5: Uploading to S3...")
-                        # output_file_path = os.path.join(self.output_dir, new_filename)
-                        # s3_url = self.upload_to_s3_wrapper(
-                        #     file_path=output_file_path,
-                        #     entity_name=entity_name,
-                        #     file_type="vrn_validated",
-                        #     shift=shift
-                        # )
-                        # output_final_file_path = os.path.join(self.output_dir, final_filename)
-                        # s3_final_url = self.upload_to_s3_wrapper(
-                        #     file_path=output_final_file_path,
-                        #     entity_name=entity_name,
-                        #     file_type="vrn_final",
-                        #     shift=shift
-                        # )
+                        # Step 5: Cleanup working files (keep output files)
+                        print("\n  STEP 5: Cleaning up working files...")
+                        self.cleanup_working_files()
                         
-                        # if not s3_url or not s3_final_url:
-                        #     self.update_database(record_id, file_status=0)
-                        #     self.cleanup_working_files()
-                        #     continue
-                        
-                        # # Delete output file after successful S3 upload
-                        # print("\n  Cleaning up output file (already uploaded to S3)...")
-                        # self.cleanup_output_file(output_file_path)
-                        
-                        # # Step 6: Update database with success
-                        # print("\n  STEP 6: Updating database...")
-                        # if self.update_database(record_id, file_status=1, file_link=s3_url, final_file_link=s3_final_url):
-                        #     print(f"  [OK] Record ID {record_id} processed successfully!")
-                        # else:
-                        #     print(f"  [ERROR] Database update failed for Record ID {record_id}")
-                        
-                        # # Step 7: Cleanup
-                        # print("\n  STEP 7: Cleaning up...")
-                        # self.cleanup_working_files()
-                        
-                        # Step 8: Check for pending emails after each file is processed
-                        print("\n  STEP 8: Checking for pending emails...")
-                        self.check_and_process_pending_emails()
-                        # self.check_and_process_pending_emails(
-                        #                date="2026-02-07",
-                        #             #    shift="12_8"
-                        #             #    shift="8_4"
-                        #                shift="4_12"
-                        #            )
+                        print(f"  [OK] Record ID {record_id} processed successfully!")
+                        print(f"  [INFO] Output files saved in: {self.output_dir}")
+                        print(f"    - {new_filename}")
+                        print(f"    - {final_filename}")
                         
                     except Exception as e:
                         print(f"  [ERROR] Unexpected error: {e}")
-                        self.update_database(record_id, file_status=0)
+                        import traceback
+                        print(traceback.format_exc())
                         self.cleanup_working_files()
-                        # Still check for emails even if file processing failed
-                        print("\n  STEP 8: Checking for pending emails...")
-                        # self.check_and_process_pending_emails()
-                        # self.check_and_process_pending_emails(
-                        #        date="2025-12-02",
-                        #        shift="8_4"
-                        #    )
-            
-            # Also check for pending emails if no files were processed
-            if not pending_files:
-                print("\n  Checking for pending emails...")
-                # self.check_and_process_pending_emails()
-                # self.check_and_process_pending_emails(
-                #                date="2025-12-18",
-                #             #    shift="12_8"
-                #                shift="8_4"
-                #             #    shift="4_12"
-                #            )
             
             # Wait before next iteration (30 seconds)
             print(f"\n{'='*80}")
@@ -907,10 +851,45 @@ class VRNProcessingAutomation:
 
 # Main execution
 if __name__ == "__main__":
-    # All plazas
+    # Define allowed entities (leave empty list to process all entities)
     allowed_entities = [
-                "bhojpuree","boharipar","khawasa","khemana","veeravalli","kherwasani","kognoli","madai","galia","maigalganj","chalageri","daroda","madapam","mahasamudram","raksha","patgaon","chhapar","faridpur","hattargi","hebbalu","bassi","dhaneshwar","dukkavanipalem","undavariya","usaka","kelapur","aroli",
-
+        "aroli",
+        "dhaneshwar",
+        "dukkavanipalem",
+        "undavariya",
+        "usaka",
+        "kelapur",
+        "bhojpuree",
+        "boharipar",
+        "khawasa",
+        "khemana",
+        "kherwasani",
+        "kognoli",
+        "madai",
+        "galia",
+"maigalganj",
+        "chalageri",
+        "daroda",
+        "madapam",
+        "mahasamudram",
+        "tarapongi",
+ "dahalapara",
+        "mudhipar",
+      "bankapur",
+        "pullur",
+        "raibha",
+        "mohtara",
+        "bahadrabad",
+        "balibhasa",
+        "odhaki_paipkhar",
+        "raksha",
+        "patgaon",
+        "chhapar",
+        "hattargi",
+        "hebbalu",
+        "bassi",
+        # "veeravalli",   
+"faridpur",
     ]
     
     # Initialize automation with entity filter

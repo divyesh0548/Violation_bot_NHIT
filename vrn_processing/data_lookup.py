@@ -3,13 +3,19 @@ import psycopg2
 import os
 from openpyxl import load_workbook
 from openpyxl.utils.dataframe import dataframe_to_rows
+try:
+    from .env_loader import load_env_file, get_env, get_env_int
+except ImportError:
+    from env_loader import load_env_file, get_env, get_env_int
+
+load_env_file()
 
 # --- Database Configuration ---
-DB_HOST = "db-1.c2n44a20y9k5.us-east-1.rds.amazonaws.com"
-DB_PORT = 5432
-DB_NAME = "nhit"
-DB_USER = "postgres"
-DB_PASSWORD = "postgres1234"
+DB_HOST = get_env("LOOKUP_DB_HOST")
+DB_PORT = get_env_int("LOOKUP_DB_PORT", 5432)
+DB_NAME = get_env("LOOKUP_DB_NAME")
+DB_USER = get_env("LOOKUP_DB_USER")
+DB_PASSWORD = get_env("LOOKUP_DB_PASSWORD")
 
 # Column name fallbacks
 VEHICLE_NUMBER_COLUMNS = [
