@@ -879,9 +879,8 @@ def scrape_vehicle_weights(df_input):
     """
     Look up vehicle weights from checkpostmaster, then web-scrape remaining vehicles.
 
-    When SELENIUM_PROCESSING=false, only the DB lookup runs (no browser scraping).
-    When SELENIUM_PROCESSING=true, remaining vehicles are scraped in parallel via
-    Selenium Grid (Remote WebDriver) using up to MAX_SELENIUM_GRID_NODES workers.
+    When SELENIUM_PROCESSING=true: scrape in parallel via Selenium Grid (Remote WebDriver).
+    When SELENIUM_PROCESSING=false: scrape sequentially with a local Chrome browser (no Grid).
 
     Returns DataFrame with Weight column populated.
     """
@@ -889,7 +888,10 @@ def scrape_vehicle_weights(df_input):
 
     print("=" * 80)
     print("STARTING VEHICLE WEIGHT LOOKUP AND SCRAPING (CHHATTISGARH)")
-    print(f"SELENIUM_PROCESSING={SELENIUM_PROCESSING}")
+    if SELENIUM_PROCESSING:
+        print(f"Mode: Selenium Grid (parallel, max nodes={MAX_SELENIUM_GRID_NODES})")
+    else:
+        print("Mode: Local Chrome (sequential, no Grid)")
     print("=" * 80)
 
     df = df_input.copy()
@@ -961,7 +963,6 @@ def scrape_vehicle_weights(df_input):
         conn.close()
     except Exception:
         pass
-    conn = None
 
     def is_empty_weight(weight):
         if pd.isna(weight):
@@ -991,14 +992,40 @@ def scrape_vehicle_weights(df_input):
     print(f"STEP 2: Web scraping {remaining_count} remaining vehicles...")
     print("=" * 80)
 
+    def merge_results(all_results):
+        nonlocal scraped_count, db_added_count, db_updated_count
+        nonlocal checkpostmaster_added, checkpostmaster_updated, capacity_added
+        for result in all_results:
+            df.at[result["idx"], "Weight"] = result["weight"]
+            scraped_count += 1
+            if not result["db_ok"]:
+                continue
+            if result["updated"]:
+                db_updated_count += 1
+                if result["table_name"] == "checkpostmaster":
+                    checkpostmaster_updated += 1
+            else:
+                db_added_count += 1
+                if result["table_name"] == "checkpostmaster":
+                    checkpostmaster_added += 1
+                elif result["table_name"] == "capacity_vehicle_numbers":
+                    capacity_added += 1
+
     if remaining_count == 0:
         print("[OK] No vehicles need web scraping")
     elif not SELENIUM_PROCESSING:
-        print(
-            "[SKIP] SELENIUM_PROCESSING=false — skipping browser scraping. "
-            "Vehicles without DB weights will remain empty."
-        )
+        # Normal local Chrome scraping (single browser, sequential)
+        print("[LOCAL] SELENIUM_PROCESSING=false — using local Chrome (no Grid)")
+        start_time = time.perf_counter()
+        all_results = _scrape_chunk_worker(remaining_df, veh_col, worker_id=1)
+        merge_results(all_results)
+        elapsed = time.perf_counter() - start_time
+        hrs = int(elapsed // 3600)
+        mins = int((elapsed % 3600) // 60)
+        secs = int(elapsed % 60)
+        print(f"\nWeb scraping completed in {hrs:02d}:{mins:02d}:{secs:02d}")
     else:
+        # Parallel Selenium Grid scraping
         try:
             from selenium_grid_manager import split_dataframe
         except ImportError:
@@ -1033,23 +1060,7 @@ def scrape_vehicle_weights(df_input):
                 except Exception as e:
                     print(f"[ERROR] Worker {worker_idx + 1} failed: {e}")
 
-        for result in all_results:
-            idx = result["idx"]
-            weight = result["weight"]
-            df.at[idx, "Weight"] = weight
-            scraped_count += 1
-
-            if result["db_ok"]:
-                if result["updated"]:
-                    db_updated_count += 1
-                    if result["table_name"] == "checkpostmaster":
-                        checkpostmaster_updated += 1
-                else:
-                    db_added_count += 1
-                    if result["table_name"] == "checkpostmaster":
-                        checkpostmaster_added += 1
-                    elif result["table_name"] == "capacity_vehicle_numbers":
-                        capacity_added += 1
+        merge_results(all_results)
 
         elapsed = time.perf_counter() - start_time
         hrs = int(elapsed // 3600)

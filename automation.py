@@ -191,7 +191,7 @@ class VRNProcessingAutomation:
         Returns list of started node container names (empty if not managing).
         """
         if not SELENIUM_PROCESSING:
-            print("  [GRID] SELENIUM_PROCESSING=false — web scraping disabled")
+            print("  [GRID] SELENIUM_PROCESSING=false — using local Chrome (no Grid nodes)")
             return []
 
         node_count = node_count or MAX_SELENIUM_GRID_NODES
@@ -240,12 +240,13 @@ class VRNProcessingAutomation:
         try:
             print("  Running VRN processing script...")
             if SELENIUM_PROCESSING:
-                print("  [LOG] Selenium Grid web-scraping is ENABLED")
+                print("  [LOG] Selenium Grid web-scraping is ENABLED (parallel)")
                 print("  [LOG] Output will be streamed in real-time below:")
                 print("  [LOG] Web-scraping progress will be visible here")
             else:
-                print("  [LOG] Selenium web-scraping is DISABLED (SELENIUM_PROCESSING=false)")
-                print("  [LOG] Pipeline will use DB lookup only for missing weights")
+                print("  [LOG] Selenium Grid DISABLED — using local Chrome scraping")
+                print("  [LOG] Output will be streamed in real-time below:")
+                print("  [LOG] Web-scraping progress will be visible here")
             print("  " + "-" * 70)
 
             # Start Grid nodes before scraping (auto-removed in finally)
