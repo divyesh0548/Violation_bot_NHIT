@@ -188,7 +188,13 @@ def send_email_to_plaza(email_data):
         # Format plaza name: remove special characters and capitalize first letter of each word
         plaza_name = format_entity_name(plaza_name_raw)
         
-        if not recipient_emails:
+        recipient_keys = {
+            email.strip().lower()
+            for email in recipient_emails
+            if email and isinstance(email, str)
+        }
+
+        if not recipient_emails and not email_data.get('cc_emails', []):
             print(f" No recipient emails found for Record ID {record_id}")
             return False
         
@@ -212,6 +218,30 @@ def send_email_to_plaza(email_data):
             "jyotibaghel@nhit.co.in",
             "vijaykumar@nhit.co.in",
             "rahulagrawal@nhit.co.in",
+        ]
+
+        extra_cc_emails = email_data.get('cc_emails', [])
+        existing_cc_emails = {
+            email.strip().lower()
+            for email in cc_emails
+            if email and isinstance(email, str)
+        }
+        for cc_email in extra_cc_emails:
+            if cc_email and isinstance(cc_email, str):
+                normalized_email = cc_email.strip()
+                normalized_key = normalized_email.lower()
+                if (
+                    normalized_key
+                    and normalized_key not in recipient_keys
+                    and normalized_key not in existing_cc_emails
+                ):
+                    cc_emails.append(normalized_email)
+                    existing_cc_emails.add(normalized_key)
+
+        cc_emails = [
+            cc_email
+            for cc_email in cc_emails
+            if cc_email.strip().lower() not in recipient_keys
         ]
         
         # Check if file has violations using check_excel_rows
@@ -263,7 +293,16 @@ Sharp and Tannan Associates
         msg.attach(MIMEText(body, 'plain'))
         
         # Combine To and CC for actual sending
-        all_recipients = recipient_emails + cc_emails
+        all_recipients = []
+        recipient_keys_seen = set()
+        for recipient_email in recipient_emails + cc_emails:
+            if not recipient_email or not isinstance(recipient_email, str):
+                continue
+            normalized_email = recipient_email.strip()
+            normalized_key = normalized_email.lower()
+            if normalized_key and normalized_key not in recipient_keys_seen:
+                all_recipients.append(normalized_email)
+                recipient_keys_seen.add(normalized_key)
         
         # Send email
         server = smtplib.SMTP(SMTP_SERVER, SMTP_PORT)

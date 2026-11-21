@@ -666,14 +666,74 @@ class VRNProcessingAutomation:
                     if email_from_email_data != email_from_submissions:
                         emails_to_send.append(email_from_email_data)
 
-                # If both are same or one is None, emails_to_send will have only one
-                # If both are different, emails_to_send will have both
+                # Fetch additional recipients for this entity.
+                # extra_emails columns: entity_name, email_type (To/CC), email
+                extra_cc_emails = []
+                try:
+                    cursor.execute(
+                        """
+                        CREATE TABLE IF NOT EXISTS extra_emails (
+                            entity_name TEXT NOT NULL,
+                            email_type TEXT NOT NULL,
+                            email TEXT NOT NULL,
+                            PRIMARY KEY (entity_name, email_type, email),
+                            CHECK (LOWER(email_type) IN ('to', 'cc'))
+                        )
+                        """
+                    )
+                    conn.commit()
+
+                    query_extra_emails = """
+                        SELECT email_type, email
+                        FROM extra_emails
+                        WHERE entity_name = %s
+                    """
+                    cursor.execute(query_extra_emails, (entity_name,))
+
+                    existing_emails = {
+                        email.strip().lower()
+                        for email in emails_to_send
+                        if email and isinstance(email, str)
+                    }
+
+                    for email_type, email in cursor.fetchall():
+                        if not email or not isinstance(email, str):
+                            continue
+
+                        normalized_email = email.strip()
+                        normalized_key = normalized_email.lower()
+                        if not normalized_key:
+                            continue
+
+                        if email_type and email_type.strip().lower() == "to":
+                            if normalized_key not in existing_emails:
+                                emails_to_send.append(normalized_email)
+                                existing_emails.add(normalized_key)
+                        elif email_type and email_type.strip().lower() == "cc":
+                            if (
+                                normalized_key not in existing_emails
+                                and normalized_key
+                                not in {
+                                    cc_email.strip().lower()
+                                    for cc_email in extra_cc_emails
+                                    if cc_email and isinstance(cc_email, str)
+                                }
+                            ):
+                                extra_cc_emails.append(normalized_email)
+
+                except psycopg2.Error as extra_email_error:
+                    conn.rollback()
+                    print(
+                        f"  [WARNING] Could not fetch extra emails from extra_emails "
+                        f"for {entity_name}: {extra_email_error}"
+                    )
 
                 # Get shift name from shift value
                 shift_name = self.get_shift_name(shift) if shift else None
 
                 result = {
                     "emails": emails_to_send,
+                    "cc_emails": extra_cc_emails,
                     "entity_name": entity_name,
                     "shift": shift,
                     "shift_name": shift_name,
@@ -1026,7 +1086,7 @@ class VRNProcessingAutomation:
             # Also check for pending emails if no files were processed
             if not pending_files:
                 print("\n  Checking for pending emails...")
-                # self.check_and_process_pending_emails()
+                self.check_and_process_pending_emails()
                 # self.check_and_process_pending_emails(
                 #                date="2025-12-18",
                 #             #    shift="12_8"
